@@ -9,7 +9,7 @@ export SPL="2021-01"
 echo "kerneldir = $KERNELDIR"
 echo "ramfs_source = $RAMFS_SOURCE"
 
-RAMFS_TMP="/tmp/arter97-op7-ramdisk"
+RAMFS_TMP="/tmp/arter97-op7-ramdisk-1"
 
 echo "ramfs_tmp = $RAMFS_TMP"
 cd $KERNELDIR
