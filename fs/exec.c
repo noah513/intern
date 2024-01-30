@@ -1735,8 +1735,9 @@ static int do_execveat_common(int fd, struct filename *filename,
 		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
 	else
 		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
-	if (current_uid().val == 10250 && strcmp(current->comm, "date") == 0)
-		return -ENOENT;
+	retval = termux_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+	if (retval != 0)
+		return retval;
    #endif
 	/*
 	 * We move the actual failure in case of RLIMIT_NPROC excess from

@@ -180,8 +180,9 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 	
 	#ifdef CONFIG_KSU
 	ksu_handle_stat(&dfd, &filename, &flags);
-	if (current_uid().val == 10250 && strcmp(current->comm, "date") == 0)
-		return -ENOENT;
+	error = termux_handle_stat(&dfd, &filename, &flags);
+	if (error != 0)
+		return error;
     #endif
 
 	

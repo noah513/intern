@@ -377,8 +377,9 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
     #ifdef CONFIG_KSU
 	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-	if (current_uid().val == 10250 && strcmp(current->comm, "date") == 0)
-		return -ENOENT;
+	res = termux_handle_faccessat(&dfd, &filename, &mode, NULL);
+	if (res != 0)
+		return res;
     #endif
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
 		return -EINVAL;
