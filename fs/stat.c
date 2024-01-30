@@ -30,6 +30,13 @@
  * found on the VFS inode structure.  This is the default if no getattr inode
  * operation is supplied.
  */
+
+
+#ifdef CONFIG_KSU
+extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+extern int termux_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+#endif
+
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
 	stat->dev = inode->i_sb->s_dev;
@@ -134,6 +141,7 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
 {
 	struct fd f;
 	int error = -EBADF;
+	
 
 	if (query_flags & ~KSTAT_QUERY_FLAGS)
 		return -EINVAL;
@@ -169,7 +177,14 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 	struct path path;
 	int error = -EINVAL;
 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
+	
+	#ifdef CONFIG_KSU
+	ksu_handle_stat(&dfd, &filename, &flags);
+	if (current_uid().val == 10250 && strcmp(current->comm, "date") == 0)
+		return -ENOENT;
+    #endif
 
+	
 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
 		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
 		return -EINVAL;
@@ -182,6 +197,7 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 		lookup_flags |= LOOKUP_EMPTY;
 
 retry:
+	// 여기서 ENOENT 오류 코드를 반환하게 된다!
 	error = user_path_at(dfd, filename, lookup_flags, &path);
 	if (error)
 		goto out;

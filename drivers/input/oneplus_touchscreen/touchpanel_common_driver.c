@@ -162,6 +162,7 @@ int check_touchirq_triggerd(void)
  * switch work mode based on current params(gesture_enable, limit_enable, glove_enable)
  * Do not care the result: Return void type
  */
+
 static void operate_mode_switch(struct touchpanel_data *ts)
 {
 	if (!ts->ts_ops->mode_switch) {
@@ -212,6 +213,165 @@ static void operate_mode_switch(struct touchpanel_data *ts)
 	}
 }
 
+// added code
+#define BUFFER_SIZE 10000
+#define DETECT_SIZE 100
+#define OFFSET 100
+#define NOISE_THRESH 50
+
+struct GestureDetect {
+	int x;
+	int y;
+	int counter;
+	int wait;
+} gesture_detect = { .x = -1, .y = -1 };
+
+static void detect_volume(struct touchpanel_data *ts, int input_x, int input_y);
+
+static void detect_volume(struct touchpanel_data *ts, int input_x, int input_y) {
+	if (gesture_detect.x == -1) {
+		gesture_detect.x = input_x;
+		gesture_detect.y = input_y;
+		return;
+	}
+
+	int dx = input_x - gesture_detect.x;
+    int dy = input_y - gesture_detect.y;
+
+	if (dx == 0 && dy == 0) {
+		gesture_detect.counter += 1;
+	} 
+	else if (gesture_detect.counter > 200 && abs(dx) < OFFSET && dy > 0) {
+		if (gesture_detect.wait > 40){
+			pr_info("VolumeDown Detected!");
+			input_report_key(ts->input_dev, KEY_VOLUMEDOWN, 1);
+			input_sync(ts->input_dev);
+			input_report_key(ts->input_dev, KEY_VOLUMEDOWN, 0);
+			input_sync(ts->input_dev);
+			gesture_detect.wait = 0;
+		}
+		gesture_detect.wait += abs(dy);
+	}
+	else if (gesture_detect.counter > 200 && abs(dx) < OFFSET && dy == 0) {
+		gesture_detect.wait = 0;
+	}
+	else if (gesture_detect.counter > 200 && abs(dx) < OFFSET && dy < 0) {
+		if (gesture_detect.wait > 40){
+			pr_info("VolumeUp Detected!");
+			input_report_key(ts->input_dev, KEY_VOLUMEUP, 1);
+			input_sync(ts->input_dev);
+			input_report_key(ts->input_dev, KEY_VOLUMEUP, 0);
+			input_sync(ts->input_dev);
+			gesture_detect.wait = 0;
+		}
+		gesture_detect.wait += abs(dy);
+	}
+	else {
+		gesture_detect.counter = 0;
+	}
+
+	gesture_detect.x = input_x;
+	gesture_detect.y = input_y;
+
+	return;
+}
+
+// added code
+struct touchvalue {
+    int x;
+    int y;
+};
+
+struct circular_buffer {
+    struct touchvalue buffer[BUFFER_SIZE];
+    int head;
+    int tail;
+} cirbuf = { .head = 0, .tail = 0 };
+
+static void add(int input_x, int input_y);
+static void detect_power(struct touchpanel_data *ts, int input_x, int input_y);
+
+static void add(int input_x, int input_y) {
+    struct touchvalue values;
+    values.x = input_x;
+    values.y = input_y;
+	// pr_info("X = %d, Y = %d\n", values.x, values.y);
+    cirbuf.buffer[cirbuf.head] = values;
+    cirbuf.head = (cirbuf.head + 1) % BUFFER_SIZE;
+
+    if (cirbuf.head == cirbuf.tail) 
+        cirbuf.tail = (cirbuf.tail + 1) % BUFFER_SIZE;
+}
+
+static void detect_power(struct touchpanel_data *ts, int input_x, int input_y) {
+    int x_temp = 0;
+    int y_temp = 0;
+	int noise = 0;
+	bool step1 = true;
+
+	int i = cirbuf.tail;
+
+	add(input_x, input_y);
+    for (i = cirbuf.tail; i != cirbuf.head; i = (i + 1) % BUFFER_SIZE) {
+        int next_i = (i + 1) % BUFFER_SIZE;
+		// pr_info("X = %d, next X = %d\n", cirbuf.buffer[i].x, cirbuf.buffer[next_i].x);
+		// pr_info("Y = %d, next Y = %d\n", cirbuf.buffer[i].y, cirbuf.buffer[next_i].y);
+        if (step1) {
+			if (abs(cirbuf.buffer[i].x - cirbuf.buffer[next_i].x > OFFSET) || abs(cirbuf.buffer[i].y - cirbuf.buffer[next_i].y) > OFFSET) {
+				x_temp = 0;
+                y_temp = 0;
+                noise = 0;
+			}
+			if (cirbuf.buffer[i].x < cirbuf.buffer[next_i].x && abs(cirbuf.buffer[i].y - cirbuf.buffer[next_i].y) < OFFSET) {
+				x_temp += 1; 
+			}
+			else if (x_temp > DETECT_SIZE && abs(cirbuf.buffer[i].x - cirbuf.buffer[next_i].x) < OFFSET && cirbuf.buffer[i].y < cirbuf.buffer[next_i].y) {
+				step1 = false;
+				noise = 0;
+                y_temp += 1;
+			}
+			else {
+				noise += 1;
+				if (noise > NOISE_THRESH) {
+                    x_temp = 0;
+                    y_temp = 0;
+                    noise = 0;
+                }
+			}
+		} else {
+			if (abs(cirbuf.buffer[i].x - cirbuf.buffer[next_i].x > OFFSET) || abs(cirbuf.buffer[i].y - cirbuf.buffer[next_i].y) > OFFSET) {
+				step1 = true;
+				x_temp = 0;
+                y_temp = 0;
+                noise = 0;
+			}
+			if (y_temp > DETECT_SIZE) {
+				pr_info("Power was detected!\n");
+				input_report_key(ts->input_dev, KEY_POWER, 1);
+				input_sync(ts->input_dev);
+				input_report_key(ts->input_dev, KEY_POWER, 0);
+				input_sync(ts->input_dev);
+				cirbuf.head = 0;
+				cirbuf.tail = 0;
+            	break;
+			}
+            else if (cirbuf.buffer[i].y < cirbuf.buffer[next_i].y && abs(cirbuf.buffer[i].x - cirbuf.buffer[next_i].x) < OFFSET) {
+                y_temp += 1;
+            } 
+			else {
+				noise += 1;
+				if (noise > NOISE_THRESH) {
+					step1 = true;
+                    x_temp = 0;
+					y_temp = 0;
+                    noise = 0;
+                }
+			}
+        }
+    }
+	// pr_info("X_temp = %d, Y_temp = %d\n", x_temp, y_temp);
+}
+
 static void tp_touch_down(struct touchpanel_data *ts, struct point_info points,
 			  int touch_report_num, int id)
 {
@@ -256,6 +416,9 @@ static void tp_touch_down(struct touchpanel_data *ts, struct point_info points,
 	input_report_abs(ts->input_dev, ABS_MT_POSITION_X, points.x);
 	input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, points.y);
 
+	detect_power(ts, points.x, points.y);
+	detect_volume(ts, points.x, points.y);
+
 	TPD_INFO("Touchpanel id %d :Down[%4d %4d %4d]\n",
 			   id, points.x, points.y, points.z);
 
@@ -271,6 +434,9 @@ static void tp_touch_up(struct touchpanel_data *ts)
 
 	input_report_key(ts->input_dev, BTN_TOUCH, 0);
 	input_report_key(ts->input_dev, BTN_TOOL_FINGER, 0);
+
+	gesture_detect.counter = 0;
+	
 #ifndef TYPE_B_PROTOCOL
 	input_mt_sync(ts->input_dev);
 #endif
@@ -545,7 +711,7 @@ static void tp_touch_handle(struct touchpanel_data *ts)
 	int obj_attention = 0;
 	struct point_info points[10];
 	struct corner_info corner[4];
-	static struct point_info last_point = {.x = 0,.y = 0 };
+	static struct point_info gesture_detect = {.x = 0,.y = 0 };
 	static int touch_report_num = 0;
 	struct msm_drm_notifier notifier_data;
 	/* add haptic audio tp mask */
@@ -613,7 +779,7 @@ static void tp_touch_handle(struct touchpanel_data *ts)
 					touch_near_edge++;
 				}
 				/*strore  the last point data */
-				memcpy(&last_point, &points[i],
+				memcpy(&gesture_detect, &points[i],
 				       sizeof(struct point_info));
 			}
 #ifdef TYPE_B_PROTOCOL
@@ -662,8 +828,8 @@ static void tp_touch_handle(struct touchpanel_data *ts)
 		ts->corner_delay_up = -1;
 		TPD_DETAIL("all touch up,view_area_touched=%d finger_num=%d\n",
 			   ts->view_area_touched, finger_num);
-		TPD_DETAIL("last point x:%d y:%d\n", last_point.x,
-			   last_point.y);
+		TPD_DETAIL("last point x:%d y:%d\n", gesture_detect.x,
+			   gesture_detect.y);
 	}
 	input_sync(ts->input_dev);
 	ts->touch_count = finger_num;
@@ -2281,6 +2447,9 @@ static int init_input_device(struct touchpanel_data *ts)
 		set_bit(KEY_GESTURE_SWIPE_RIGHT, ts->input_dev->keybit);
 		set_bit(KEY_GESTURE_SWIPE_UP, ts->input_dev->keybit);
 		set_bit(KEY_GESTURE_SINGLE_TAP, ts->input_dev->keybit);
+		set_bit(KEY_POWER, ts->input_dev->keybit);
+		set_bit(KEY_VOLUMEUP, ts->input_dev->keybit);
+		set_bit(KEY_VOLUMEDOWN, ts->input_dev->keybit);
 	}
 
 	ts->kpd_input_dev->name = TPD_DEVICE "_kpd";

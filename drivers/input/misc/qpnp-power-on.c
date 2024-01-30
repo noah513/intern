@@ -956,12 +956,14 @@ static int qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	case PON_KPDPWR:
 		pon_rt_bit = QPNP_PON_KPDPWR_N_SET;
 		if ((pon_rt_sts & pon_rt_bit) == 0) {
-			pr_info("Power-Key UP\n");
+			//pr_info("Power-Key UP\n");
+			pr_info("Power key up: button code: %d\n", cfg->key_code);
 			schedule_work(&pon->up_work);
 			cancel_delayed_work(&pon->sync_work);
 			cancel_delayed_work(&pon->press_work);
 		} else {
-			pr_info("Power-Key DOWN\n");
+			//pr_info("Power-Key DOWN\n");
+			pr_info("Power key down: button code: %d\n", cfg->key_code);
 			schedule_delayed_work(&pon->sync_work, msecs_to_jiffies(1000));
 			schedule_delayed_work(&pon->press_work, msecs_to_jiffies(4000));
 		}

@@ -4970,6 +4970,12 @@ CONFIG_RMNET_PERF=y
 CONFIG_RMNET_SHS=y
 
 #
+# KernelSU
+#
+CONFIG_KSU=y
+# CONFIG_KSU_DEBUG=y
+
+#
 # Firmware Drivers
 #
 CONFIG_ARM_PSCI_FW=y
